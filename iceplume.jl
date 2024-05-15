@@ -227,7 +227,7 @@ end
 #@inline sponge_b(x, y, z, b, p) = -west_mask_cos(x, y, z) * p.σ * (b -  b_west(y, z, t, p)) -east_mask_cos(x, y, z) * p.σ * (b -  b_east(y, z, t, p))# nudges S to S∞
 
 @inline sponge_b(x, y, z , b, p) = -west_mask_cos(x, y, z) * p.σ * (b -  b_west(y, z, p)) -east_mask_cos(x, y, z) * p.σ * (b -  b_east(y, z, p))
-
+##^^^^^^^^^SOMETHING IS WRONG HERE??? why is it complaining about b_west and b_east??
 #----
 
 #++++ Assembling forcings and BCs
@@ -266,6 +266,7 @@ end
 #b_bcs = FieldBoundaryConditions(top = FluxBoundaryCondition(Qu),  # wind stress
 #                                bottom = drag_bc_u,
 #                                )                  
+#IS THERE SOMETHING WRONG WITH MY BOUNDARY CONDITIONS?? i just want wind-driven surface boundary conditions and bottom drag bcs
 u_bcs = FieldBoundaryConditions(top = FluxBoundaryCondition(Qu),  # wind stress
                                 bottom = drag_bc_u,
                                 )
