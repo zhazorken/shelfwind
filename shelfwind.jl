@@ -1,4 +1,10 @@
 using Pkg
+#Pkg.instantiate() # Only need to do this once when you started the repo in another machine
+#Pkg.resolve()
+#import Pkg; Pkg.add("Oceananigans")
+#import Pkg; Pkg.add("Rasters")
+#Pkg.instantiate() # Only need to do this once when you started the repo in another machine
+#Pkg.resolve()
 using Oceananigans
 using Oceananigans.Units
 using Printf
@@ -26,26 +32,26 @@ end
 
 #++++ Construct grid
 if LES
-    params = (; Lx = 50000,
-              Ly = 100000,
+    params = (; Lx = 50e3,
+              Ly = 100e3,
               Lz = 200,
-              Nx = 250,
-              Ny = 500,
-              Nz = 100,
+              Nx = 25,
+              Ny = 50,
+              Nz = 10,
               ) 
 
 else
     params = (; Lx = 50000,
               Ly = 100000,
               Lz = 200,
-              Nx = 250, #ideally 512
-              Ny = 500, ##Int(Nx/2*3/5)
-              Nz = 100, #ideally 750
+              Nx = 25, #ideally 512
+              Ny = 50, ##Int(Nx/2*3/5)
+              Nz = 10, #ideally 750
               )
 end
 
 if arch == CPU() # If there's no CPU (e.g. if we wanna test shit on a laptop) let's use a smaller number of points!
-    params = (; params..., Nx = 16, Ny = 32, Nz = 20)
+    params = (; params..., Nx = 80, Ny = 80, Nz = 40)
 end
 
 # Creates a grid with near-constant spacing `refinement * Lz / Nz`
@@ -68,14 +74,30 @@ h(k) = (Nz+ 1 - k) / params.Nz
 # Generating function
 z_faces(k) = -params.Lz * (ζ₀(k) * Σ(k) - 1)
 
-grid = RectilinearGrid(arch,
+
+underlying_grid = RectilinearGrid(arch,
                        size = (params.Nx, params.Ny, params.Nz),
                        x = (0, params.Lx),
                        y = (-params.Ly/2, +params.Ly/2),
-                       z = z_faces,
+                       z = (-params.Lz, 0),  #z_faces,
+                       halo = (4, 4, 4),
                        topology = (Bounded, Periodic, Bounded))
-@info "Grid" grid
+
 #----
+
+#H=200
+bottom(x,y) =  max(- x*160/8000, -(x-8000)*40/42000-160)
+
+grid = ImmersedBoundaryGrid(underlying_grid, GridFittedBottom(bottom))
+
+#h₀ = 50meters
+#width = 5kilometers
+#hill(x) = h₀ * exp(-x^2 / 2width^2)
+#bottom(x) = - 200 + hill(x)
+
+grid = ImmersedBoundaryGrid(underlying_grid, GridFittedBottom(bottom))
+
+@info "Grid" grid
 
 #++++ Creates a dictionary of simulation parameters
 if mass_flux # m/s
@@ -91,39 +113,41 @@ params = (; params...,
           N²₀ = 2e-4, #  9.83/1028*2/100  1/s (stratification frequency)
           #z₀ = 300, # m
           #σz_west = 10, # m (height of the dense water inflow at the west boundary)
-          u₁_west = u₁_west, # m/s (speed of water inflow at the west boundary)
+          #u₁_west = u₁_west, # m/s (speed of water inflow at the west boundary)
           #ℓ₀ = 0.1, # m (roughness length)
-          σ = 2000.0seconds, # s (relaxation rate for sponge layer)
+          σ = 8000.0seconds, # s (relaxation timescale for sponge layer)
           #uₑᵥₐᵣ = 0.00, # m/s (velocity variation along the z direction of the east boundary)
           u_b = 0,    # m s⁻¹, average wind velocity 10 meters above the ocean
-          v_b = 0,    #-10    # m s⁻¹, average wind velocity 10 meters above the ocean
+          v_b = 10,    #-10    # m s⁻¹, average wind velocity 10 meters above the ocean
           )
 #----
 
 #++++ Conditions opposite to the ice wall (@ infinity)
 if LES
-    b∞(z, parameters) = parameters.N²₀ * z # Linear stratification in the interior (far from ice face)
-else
-    T∞(x, parameters) = 8. - 0.0 * x
-    S∞(x, parameters) = 34.9 - 0.0 * x
-    u∞(x, parameters) = @allowscalar u_b
-    v∞(x, parameters) = @allowscalar v_b
+  #  b∞(z, parameters) = params.N²₀ * z # Linear stratification in the interior (far from ice face)
+    Teast(z, parameters) = 4.1 - .5/200 * z
+    Seast(z, parameters) = 34 - 1/200 * z   #first number is surface salinity offshore, this is offshore data
+    Twest(z, parameters) = (z+100).^2/60^2+1.6  #1.6 deg middepth. 4deg at surf and bot
+    Swest(z, parameters) = 31 - 3/200 * z   #
+    u∞(z, parameters) = @allowscalar u_b
+    v∞(z, parameters) = @allowscalar v_b
 end
 #----
 
 #++++ EAST BCs
 if LES
-    b_east(y, z, t, p) = b∞(z, p) - 2/1028*9.8 #  delta rho/rho0 * g + p.b₁_west / (1 + exp((z-p.z₀)/p.σz_west))
+  #  b_east(y, z, t, p) = b∞(z, p) - 0.02 #2/1028*9.8 #  delta rho/rho0 * g + p.b₁_west / (1 + exp((z-p.z₀)/p.σz_west))
 else
     if mass_flux
         u_west(y, z, t, p) = p.u₁_west # / (1 + exp((z-p.z₀)/p.σz_west))
     end
 end
+#---
 
 #++++ WEST BCs
 
 if LES
-    b_west(y, z, t, p) = b∞(z, p) #+ p.b₁_west / (1 + exp((z-p.z₀)/p.σz_west))
+  #  b_west(y, z, t, p) = b∞(z, p) #+ p.b₁_west / (1 + exp((z-p.z₀)/p.σz_west))
 else
     if mass_flux
         u_west(y, z, t, p) = p.u₁_west # / (1 + exp((z-p.z₀)/p.σz_west))
@@ -147,11 +171,11 @@ if LES
    # x₁ₘₒ = @allowscalar xnodes(grid, Center())[1] # Closest grid center to the bottom
    # cᴰ = (κ / log(x₁ₘₒ/params.ℓ₀))^2 # Drag coefficient
 
-    @inline drag_u(x, y, t, v, w, p) = - p.cᴰ * √(u^2 + v^2) * u
-    @inline drag_v(x, y, t, v, w, p) = - p.cᴰ * √(u^2 + v^2) * v
+    @inline drag_u(x, y, t, u, v, p) = - p.cᴰ * √(u^2 + v^2) * u
+    @inline drag_v(x, y, t, u, v, p) = - p.cᴰ * √(u^2 + v^2) * v
 
-    drag_bc_u = FluxBoundaryCondition(drag_u, field_dependencies=(:u, :v), parameters=(cᴰ=cᴰ,))
-    drag_bc_v = FluxBoundaryCondition(drag_v, field_dependencies=(:v, :v), parameters=(cᴰ=cᴰ,))
+    drag_bc_u = FluxBoundaryCondition(drag_u, field_dependencies=(:u, :v), parameters=(; cᴰ=cᴰ,))
+    drag_bc_v = FluxBoundaryCondition(drag_v, field_dependencies=(:v, :v), parameters=(; cᴰ=cᴰ,))
 end
 #----
 #----
@@ -167,48 +191,28 @@ else
 end
 #----
 
-#++++ Eastern sponge layer 
+#++++ West sponge layer 
 # (smoothes out the mass flux and gets rid of some of the build up of buoyancy)
+@inline function west_mask(x, y, z)
+    x0 = 0  #inner location
+    x1 = 5000  #outer location
 
-const Lz = params.Lz
-const Lx = params.Lx
-@inline function east_mask_cos(x, y, z)
-    x₀ = Lx-5000  #inner location
-    x₁ = Lx  #outer location
-
-    if x₀ <= x <= x₁
-        return 1/2 * (1 - cos( π*(x-x₀)/(x₁-x₀) ))
-    elseif x₁ < x
-        return 1.0
+    if x0 <= x <= x1
+        return x/x1
     else
         return 0.0
     end
 end
+#---
 
-@inline function west_mask_cos(x, y, z)
-    x₀ = 0  
-    x₁ = 5000 
+#++++ Eastern sponge layer 
 
-    if x₀ <= x <= x₁
-        return 1/2 * (1 - cos( π*(x-x₀)/(x₁-x₀) ))
-    elseif x₁ < x
-        return 1.0
-    else
-        return 0.0
-    end
-end
-
-@inline function east_west_mask_cos(x, y, z)
-    x₀ = 0  
-    x₁ = 5000
-    
-    x2 = Lx-5000  #inner location
-    x3 = Lx  #outer location
-
-    if x₀ <= x <= x₁
-        return 1/2 * (1 - cos( π*(x-x₀)/(x₁-x₀) ))
-    elseif x2 <= x <= x3
-        return 1/2 * (1 - cos( π*(x-x2)/(x3-x2) )) 
+const x1 = 5000  #bdy width
+const x2 = params.Lx-x1  #inner location
+const x3 = params.Lx  #outer location
+@inline function east_mask(x, y, z)
+    if x2 <= x <= x3
+        return 1.0 - (x3-x)/x1
     else
         return 0.0
     end
@@ -220,27 +224,22 @@ if mass_flux
     @inline sponge_v(x, y, z, t, v, p) = -west_mask_cos(x, y, z) * p.σ * v # nudges v to zero
     @inline sponge_w(x, y, z, t, w, p) = -west_mask_cos(x, y, z) * p.σ * w # nudges w to zero
 end
-#@inline sponge_u(x, y, z, t, u, p) = -min(west_mask_cos(x, y, z)+top_bot_mask_cos(x,y,z),1.0) * p.σ * (u - p.u_b) # nudges u to u∞
-#@inline sponge_v(x, y, z, t, v, p) = -west_mask_cos(x, y, z) * p.σ * (v - p.v_b) # nudges v to v∞
-#@inline sponge_T(x, y, z, t, T, p) = -west_mask_cos(x, y, z) * p.σ * (T - T∞(x, p)) # nudges T to T∞
-#@inline sponge_S(x, y, z, t, S, p) = -west_mask_cos(x, y, z) * p.σ * (S - S∞(x, p)) # nudges S to S∞
-#@inline sponge_b(x, y, z, b, p) = -west_mask_cos(x, y, z) * p.σ * (b -  b_west(y, z, t, p)) -east_mask_cos(x, y, z) * p.σ * (b -  b_east(y, z, t, p))# nudges S to S∞
-
-@inline sponge_b(x, y, z , b, p) = -west_mask_cos(x, y, z) * p.σ * (b -  b_west(y, z, p)) -east_mask_cos(x, y, z) * p.σ * (b -  b_east(y, z, p))
+@inline sponge_T(x, y, z, t, T, p) = -east_mask(x, y, z) / p.σ * (T - Teast(z, p))-west_mask(x, y, z) / p.σ * (T - (Twest(z, p))) # nudges T to T∞
+@inline sponge_S(x, y, z, t, S, p) = -east_mask(x, y, z) / p.σ * (S - Seast(z, p))-west_mask(x, y, z) / p.σ * (S - (Swest(z, p))) # nudges S to S∞
 
 #----
 
 #++++ Assembling forcings and BCs
-if ext_forcing
+#if ext_forcing
  # Fᵤ = Forcing(sponge_u, field_dependencies = :u, parameters = params)
  # Fᵥ = Forcing(sponge_v, field_dependencies = :v, parameters = params)
-  Fb = Forcing(sponge_b, field_dependencies = :b, parameters = params)
-  forcing = ( b = Fb )
-else
+ # Fb = Forcing(sponge_b, field_dependencies = :b, parameters = params)
+ # forcing = (b=Fb,)
+#else
   FT = Forcing(sponge_T, field_dependencies = :T, parameters = params)
   FS = Forcing(sponge_S, field_dependencies = :S, parameters = params)
   forcing = (T=FT, S=FS)
-end
+#end
 
 if mass_flux
     Fᵤ = Forcing(sponge_u, field_dependencies = :u, parameters = params)
@@ -250,24 +249,25 @@ if mass_flux
 end
 
 
-#T_bcs = FieldBoundaryConditions(top = ValueBoundaryCondition(get_T0, field_dependencies=(:T, :S)), 
-#                                west = FluxBoundaryCondition(0), 
-#                                east = FluxBoundaryCondition(0), # Hidden behind sponge layer
-#                                )
+T_bcs = FieldBoundaryConditions(#top = ValueBoundaryCondition(get_T0, field_dependencies=(:T, :S)), 
+                                #west = FluxBoundaryCondition(0), 
+                                #east = FluxBoundaryCondition(0), # Hidden behind sponge layer
+                                )
 
                                 
-#S_bcs = FieldBoundaryConditions(top = ValueBoundaryCondition(get_S0, field_dependencies=(:T, :S)),
-#                                west = FluxBoundaryCondition(0),  
-#                                east = FluxBoundaryCondition(0), # Hidden behind sponge layer
-#                                )
+S_bcs = FieldBoundaryConditions(#top = ValueBoundaryCondition(get_S0, field_dependencies=(:T, :S)),
+                                #west = FluxBoundaryCondition(0),  
+                                #east = FluxBoundaryCondition(0), # Hidden behind sponge layer
+                                )
 #w_bcs = FieldBoundaryConditions(east = ValueBoundaryCondition(0),
 #                                west = ValueBoundaryCondition(0),
 #                                )      
 #b_bcs = FieldBoundaryConditions(top = FluxBoundaryCondition(Qu),  # wind stress
 #                                bottom = drag_bc_u,
 #                                )                  
+#IS THERE SOMETHING WRONG WITH MY BOUNDARY CONDITIONS?? i just want wind-driven surface boundary conditions and bottom drag bcs
 u_bcs = FieldBoundaryConditions(top = FluxBoundaryCondition(Qu),  # wind stress
-                                bottom = drag_bc_u,
+                                bottom = drag_bc_u, # # bottom = drag_bc_u,
                                 )
 v_bcs = FieldBoundaryConditions(top = FluxBoundaryCondition(Qv),  # wind stress
                                 bottom = drag_bc_v,
@@ -277,31 +277,24 @@ v_bcs = FieldBoundaryConditions(top = FluxBoundaryCondition(Qv),  # wind stress
 w_bcs = FieldBoundaryConditions(#east = ValueBoundaryCondition(0),
                                 #west = ValueBoundaryCondition(0),
                                 )
-boundary_conditions = (u=u_bcs, v=v_bcs, w=w_bcs)
+boundary_conditions = (u=u_bcs, v=v_bcs, w=w_bcs, T=T_bcs, S=S_bcs,)
 #----
 
 #++++ Construct model
 if LES
     closure = AnisotropicMinimumDissipation()
 else
-    closure = ScalarDiffusivity(VerticallyImplicitTimeDiscretization(),ν=1.8e-6, κ=(T=1.3e-7, S=7.2e-10))
+    closure = ScalarDiffusivity(ν=1.8e-6, κ=(T=1.3e-7, S=7.2e-10))
 end
 
-θ = 105 # degrees relative to pos. x-axis
+#θ = 105 # degrees relative to pos. x-axis
 
 model = HydrostaticFreeSurfaceModel(grid = grid, 
-                            #advection = WENO(grid=grid, order=5),
-                            #timestepper = :RungeKutta3, 
-                           # timestepper = :QuasiAdamsBashforth2, 
-                            tracers = :b,
-                            #tracers = (:T, :S),
-                            buoyancy = BuoyancyTracer(),
+                            tracers = (:T, :S),
+                            buoyancy = Buoyancy(model=SeawaterBuoyancy(equation_of_state=LinearEquationOfState(thermal_expansion = 3.87e-5,
+                                                                                                               haline_contraction = 7.86e-4))),
                             momentum_advection = WENO(),
                             tracer_advection = WENO(),
-                            #buoyancy = Buoyancy(model=SeawaterBuoyancy(equation_of_state=LinearEquationOfState(thermal_expansion = 3.87e-5,
-                            #haline_contraction = 7.86e-4)), gravity_unit_vector=(-sind(θ),0,-cosd(θ))),
-                            #buoyancy = SeawaterBuoyancy(equation_of_state=LinearEquationOfState(thermal_expansion = 3.87e-5,
-                            #haline_contraction = 7.86e-4)),
                             coriolis = FPlane(1.26e-4),
                             closure = closure,
                             forcing = forcing,
@@ -313,15 +306,15 @@ model = HydrostaticFreeSurfaceModel(grid = grid,
 #++++ Create simulation
 using Oceanostics: SingleLineProgressMessenger
 
-Δt₀ = 1/2 * minimum_zspacing(grid) / (u₁_west + 1e-1)
+Δt₀ = 1/2 * minimum_yspacing(grid) / 1 # / (u₁_west + 1)
 simulation = Simulation(model, Δt=Δt₀,
-                        stop_time = 2400seconds, # when to stop the simulation
+                        stop_time = 15days, # when to stop the simulation
 )
 
 #++++ Adapt time step
-wizard = TimeStepWizard(cfl=0.6, # How to adjust the time step
+wizard = TimeStepWizard(cfl=0.8, # How to adjust the time step
                        # diffusive_cfl=5,
-                        max_change=1.02, min_change=0.2, max_Δt=0.5/√params.N²₀, min_Δt=0.1seconds)
+                        max_change=1.02, min_change=0.2, min_Δt=0.1seconds) #max_Δt=0.5/√params.N²₀)
 simulation.callbacks[:wizard] = Callback(wizard, IterationInterval(2)) # When to adjust the time step
 #----
 
@@ -329,7 +322,7 @@ simulation.callbacks[:wizard] = Callback(wizard, IterationInterval(2)) # When to
 start_time = time_ns() * 1e-9
 progress = SingleLineProgressMessenger(SI_units=true,
                                        initial_wall_time_seconds=start_time)
-simulation.callbacks[:progress] = Callback(progress, IterationInterval(10)) # when to print on screen
+simulation.callbacks[:progress] = Callback(progress, IterationInterval(5)) # when to print on screen
 #----
 
 @info "Simulation" simulation
@@ -338,8 +331,8 @@ simulation.callbacks[:progress] = Callback(progress, IterationInterval(10)) # wh
 #++++ Impose initial conditions
 u, v, w =  model.velocities
 
-b = model.tracers.b
-#S = model.tracers.S
+T = model.tracers.T
+S = model.tracers.S
 
 if interpolated_IC
 
@@ -359,9 +352,11 @@ if interpolated_IC
 else
     @info "Imposing initial conditions from scratch"
 
- 
+    T_ic(x, y, z) = Teast(z, params)
 
-    b_ic(x, y, z) = b∞(z, params)- 2/1028*9.8*x/Lx
+    S_ic(x, y, z) = Seast(z, params)
+
+ #   b_ic(x, y, z) = b∞(z, params)- 2/1028*9.8*x/params.Lx
     
  #   T_ic(x,y,z) =  2/pi*(T∞(x,params)-T_i)*atan((Lz-z)/delta_B)+T_i
 
@@ -376,7 +371,7 @@ else
     vᵢ .-= mean(vᵢ)
     wᵢ .-= mean(wᵢ)
     uᵢ .+= 0 #params.u_b
-    vᵢ .+= -0.2 #params.v_b    
+    vᵢ .+= -.25 #-0.2 #params.v_b    
 
  
 #    plumewidth(x)=.0833*x;
@@ -393,7 +388,7 @@ else
     
 # uᵢ .+=  u_ic(x,y,z)
 
-    set!(model, u=uᵢ, v=vᵢ, w=wᵢ, b=b_ic)
+    set!(model, T=T_ic, S=S_ic, u=uᵢ, v=vᵢ, w=wᵢ)
 end
 #----
 
@@ -403,7 +398,7 @@ end
 # y-component of vorticity
 ω_z = Field(∂x(v) - ∂y(u))
 
-outputs = (; u, v, w, b, ω_z)
+outputs = (; u, v, w, T,S,ω_z)
 
 if mass_flux
     saved_output_prefix = "iceplume"
@@ -424,13 +419,13 @@ end
 #---
 
 simulation.output_writers[:surface_slice_writer] =
-    NetCDFOutputWriter(model, (; u,v,w, b), filename="top.nc",
-                       schedule=TimeInterval(864), indices=(:, :, 1),
+    NetCDFOutputWriter(model, (; u,v,w, T,S), filename="top.nc",
+                       schedule=TimeInterval(8640), indices=(:, :, 1),
                         overwrite_existing = overwrite_existing)
 
 simulation.output_writers[:y_slice_writer] =
-    NetCDFOutputWriter(model,(; u, v, w, b), filename="midy.nc",
-                       schedule=TimeInterval(864), indices=(:, round(params.Ny/2), :), 
+    NetCDFOutputWriter(model,(; u, v, w, T,S), filename="midy.nc",
+                       schedule=TimeInterval(8640), indices=(:, round(params.Ny/2), :), 
                        overwrite_existing = overwrite_existing)
 
 ccc_scratch = Field{Center, Center, Center}(model.grid) # Create some scratch space to save memory
@@ -438,30 +433,30 @@ ccc_scratch = Field{Center, Center, Center}(model.grid) # Create some scratch sp
 uv = Field((@at (Center, Center, Center) u*v))
 uw = Field((@at (Center, Center, Center) u*w))
 vw = Field((@at (Center, Center, Center) v*w))
-ub = Field((@at (Center, Center, Center) u*b))
-vb = Field((@at (Center, Center, Center) v*b))
-wb = Field((@at (Center, Center, Center) w*b))
-#uS = Field((@at (Center, Center, Center) u*S))
-#vS = Field((@at (Center, Center, Center) v*S))
-#wS = Field((@at (Center, Center, Center) w*S))
+uT = Field((@at (Center, Center, Center) u*T))
+vT = Field((@at (Center, Center, Center) v*T))
+wT = Field((@at (Center, Center, Center) w*T))
+uS = Field((@at (Center, Center, Center) u*S))
+vS = Field((@at (Center, Center, Center) v*S))
+wS = Field((@at (Center, Center, Center) w*S))
 
 u_yavg = Average(u, dims=(2))
 v_yavg = Average(v, dims=(2))
 w_yavg = Average(w, dims=(2))
-b_yavg = Average(b, dims=(2))
-#S_yavg = Average(S, dims=(2))
+T_yavg = Average(T, dims=(2))
+S_yavg = Average(S, dims=(2))
 uv_yavg = Average(uv, dims=(2))
 uw_yavg = Average(uw, dims=(2))
 vw_yavg = Average(vw, dims=(2))
-ub_yavg = Average(ub, dims=(2))
-vb_yavg = Average(vb, dims=(2))
-wb_yavg = Average(wb, dims=(2))
-#uS_yavg = Average(uS, dims=(2))
-#vS_yavg = Average(vS, dims=(2))
-#wS_yavg = Average(wS, dims=(2))
+uT_yavg = Average(uT, dims=(2))
+vT_yavg = Average(vT, dims=(2))
+wT_yavg = Average(wT, dims=(2))
+uS_yavg = Average(uS, dims=(2))
+vS_yavg = Average(vS, dims=(2))
+wS_yavg = Average(wS, dims=(2))
 
 output_interval=86400seconds
-simulation.output_writers[:averages] = NetCDFOutputWriter(model, (; u_yavg, v_yavg, w_yavg, b_yavg, uv_yavg, uw_yavg, vw_yavg, ub_yavg, vb_yavg, wb_yavg ),
+simulation.output_writers[:averages] = NetCDFOutputWriter(model, (; u_yavg, v_yavg, w_yavg, T_yavg, S_yavg, uv_yavg, uw_yavg, vw_yavg, uT_yavg, vT_yavg, wT_yavg,  uS_yavg, vS_yavg, wS_yavg, ),
                                                           schedule = AveragedTimeInterval(output_interval, window=output_interval),
                                                           filename = "timeavgedfields_yavg.nc",
                                                           overwrite_existing = overwrite_existing)
@@ -498,10 +493,10 @@ SP_z_yavg = Average(SP_z, dims=(2))
 
 KE_output_fields = (; KE_yavg, ε_yavg, ∫KE, ∫ε, ∫εᴰ, εᴰ_yavg, TKE_yavg, SP_x_yavg, SP_y_yavg, SP_z_yavg  )
 
-simulation.output_writers[:nc] = NetCDFOutputWriter(model, KE_output_fields,
-                                                    filename = "KE_yavg.nc",
-                                                    schedule = TimeInterval(86400second),
-                                                    overwrite_existing = overwrite_existing)
+#simulation.output_writers[:nc] = NetCDFOutputWriter(model, KE_output_fields,
+#                                                    filename = "KE_yavg.nc",
+#                                                    schedule = TimeInterval(86400second),
+#                                                    overwrite_existing = overwrite_existing)
 simulation.output_writers[:nQ] = NetCDFOutputWriter(model, (; Q=Q_inv),
                                                     filename = "Q.nc",
                                                     schedule = TimeInterval(864000second),
