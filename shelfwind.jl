@@ -171,8 +171,8 @@ if LES
    # x₁ₘₒ = @allowscalar xnodes(grid, Center())[1] # Closest grid center to the bottom
    # cᴰ = (κ / log(x₁ₘₒ/params.ℓ₀))^2 # Drag coefficient
 
-    @inline drag_u(x, y, t, u, v, p) = - cᴰ * √(u^2 + v^2) * u
-    @inline drag_v(x, y, t, u, v, p) = - cᴰ * √(u^2 + v^2) * v
+    @inline drag_u(x, y, t, u, v, p) = - p.cᴰ * √(u^2 + v^2) * u
+    @inline drag_v(x, y, t, u, v, p) = - p.cᴰ * √(u^2 + v^2) * v
 
     drag_bc_u = FluxBoundaryCondition(drag_u, field_dependencies=(:u, :v), parameters=(; cᴰ=cᴰ,))
     drag_bc_v = FluxBoundaryCondition(drag_v, field_dependencies=(:v, :v), parameters=(; cᴰ=cᴰ,))
@@ -298,7 +298,7 @@ model = HydrostaticFreeSurfaceModel(grid = grid,
                             coriolis = FPlane(1.26e-4),
                             closure = closure,
                             forcing = forcing,
-                            #boundary_conditions = boundary_conditions,
+                            boundary_conditions = boundary_conditions,
                             )
 @info "Model" model
 #----
