@@ -207,13 +207,12 @@ end
 
 #++++ Eastern sponge layer 
 
+const x1 = 5000  #bdy width
+const x2 = params.Lx-x1  #inner location
+const x3 = params.Lx  #outer location
 @inline function east_mask(x, y, z)
-    x1 = 5000  #bdy width
-    x2 = params.Lx-x1  #inner location
-    x3 = params.Lx  #outer location
-
     if x2 <= x <= x3
-        return 1 - (params.Lx-x)/x1
+        return 1.0 - (x3-x)/x1
     else
         return 0.0
     end
@@ -225,15 +224,9 @@ if mass_flux
     @inline sponge_v(x, y, z, t, v, p) = -west_mask_cos(x, y, z) * p.σ * v # nudges v to zero
     @inline sponge_w(x, y, z, t, w, p) = -west_mask_cos(x, y, z) * p.σ * w # nudges w to zero
 end
-#@inline sponge_u(x, y, z, t, u, p) = -min(west_mask_cos(x, y, z)+top_bot_mask_cos(x,y,z),1.0) * p.σ * (u - p.u_b) # nudges u to u∞
-#@inline sponge_v(x, y, z, t, v, p) = -west_mask_cos(x, y, z) * p.σ * (v - p.v_b) # nudges v to v∞
-#@inline sponge_T(x, y, z, t, T, p) = -west_mask_cos(x, y, z) * p.σ * (T - T∞(x, p)) # nudges T to T∞
-#@inline sponge_S(x, y, z, t, S, p) = -west_mask_cos(x, y, z) * p.σ * (S - S∞(x, p)) # nudges S to S∞
-#@inline sponge_b(x, y, z, b, p) = -west_mask_cos(x, y, z) * p.σ * (b -  b_west(y, z, t, p)) -east_mask_cos(x, y, z) * p.σ * (b -  b_east(y, z, t, p))# nudges S to S∞
 @inline sponge_T(x, y, z, t, T, p) = -east_mask(x, y, z) / p.σ * (T - Teast(z, p))-west_mask(x, y, z) / p.σ * (T - (Twest(z, p))) # nudges T to T∞
 @inline sponge_S(x, y, z, t, S, p) = -east_mask(x, y, z) / p.σ * (S - Seast(z, p))-west_mask(x, y, z) / p.σ * (S - (Swest(z, p))) # nudges S to S∞
 
-##^^^^^^^^^SOMETHING IS WRONG HERE??? why is it complaining about b_west and b_east??
 #----
 
 #++++ Assembling forcings and BCs
@@ -305,7 +298,7 @@ model = HydrostaticFreeSurfaceModel(grid = grid,
                             coriolis = FPlane(1.26e-4),
                             closure = closure,
                             forcing = forcing,
-                            boundary_conditions = boundary_conditions,
+                            #boundary_conditions = boundary_conditions,
                             )
 @info "Model" model
 #----
