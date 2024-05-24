@@ -304,8 +304,8 @@ model = HydrostaticFreeSurfaceModel(grid = grid,
                             tracer_advection = WENO(),
                             coriolis = FPlane(1.26e-4),
                             closure = closure,
-                            #forcing = forcing,
-                            #boundary_conditions = boundary_conditions,
+                            forcing = forcing,
+                            boundary_conditions = boundary_conditions,
                             )
 @info "Model" model
 #----
