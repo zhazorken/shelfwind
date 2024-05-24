@@ -35,18 +35,18 @@ if LES
     params = (; Lx = 50e3,
               Ly = 100e3,
               Lz = 200,
-              Nx = 250,
-              Ny = 500,
-              Nz = 100,
+              Nx = 25,
+              Ny = 50,
+              Nz = 10,
               ) 
 
 else
     params = (; Lx = 50000,
               Ly = 100000,
               Lz = 200,
-              Nx = 250, #ideally 512
-              Ny = 500, ##Int(Nx/2*3/5)
-              Nz = 100, #ideally 750
+              Nx = 25, #ideally 512
+              Ny = 50, ##Int(Nx/2*3/5)
+              Nz = 10, #ideally 750
               )
 end
 
@@ -142,6 +142,7 @@ else
         u_west(y, z, t, p) = p.u₁_west # / (1 + exp((z-p.z₀)/p.σz_west))
     end
 end
+#---
 
 #++++ WEST BCs
 
@@ -202,6 +203,7 @@ end
         return 0.0
     end
 end
+#---
 
 #++++ Eastern sponge layer 
 
@@ -288,32 +290,22 @@ boundary_conditions = (u=u_bcs, v=v_bcs, w=w_bcs, T=T_bcs, S=S_bcs,)
 #++++ Construct model
 if LES
     closure = AnisotropicMinimumDissipation()
-    #closure = ScalarDiffusivity(ν=1e-2, κ=1e-2)
 else
-    closure = ScalarDiffusivity(VerticallyImplicitTimeDiscretization(),ν=1.8e-6, κ=(T=1.3e-7, S=7.2e-10))
+    closure = ScalarDiffusivity(ν=1.8e-6, κ=(T=1.3e-7, S=7.2e-10))
 end
 
 #θ = 105 # degrees relative to pos. x-axis
 
 model = HydrostaticFreeSurfaceModel(grid = grid, 
-                            #advection = WENO(grid=grid, order=5),
-                            #timestepper = :RungeKutta3, 
-                            #timestepper =  :RungeKutta3, #:QuasiAdamsBashforth2, 
                             tracers = (:T, :S),
                             buoyancy = Buoyancy(model=SeawaterBuoyancy(equation_of_state=LinearEquationOfState(thermal_expansion = 3.87e-5,
-                            haline_contraction = 7.86e-4)), gravity_unit_vector=(0,0,-1)),
-                            #tracers = (:T, :S),
-                            #buoyancy = BuoyancyTracer(),
-                            momentum_advection = WENO(),
-                            tracer_advection = WENO(),
-                            #buoyancy = Buoyancy(model=SeawaterBuoyancy(equation_of_state=LinearEquationOfState(thermal_expansion = 3.87e-5,
-                            #haline_contraction = 7.86e-4)), gravity_unit_vector=(-sind(θ),0,-cosd(θ))),
-                            #buoyancy = SeawaterBuoyancy(equation_of_state=LinearEquationOfState(thermal_expansion = 3.87e-5,
-                            #haline_contraction = 7.86e-4)),
-                            coriolis = FPlane(1.26e-4),
+                                                                                                               haline_contraction = 7.86e-4))),
+                            #momentum_advection = WENO(),
+                            #tracer_advection = WENO(),
+                            #coriolis = FPlane(1.26e-4),
                             closure = closure,
-                            forcing = forcing,
-                            boundary_conditions = boundary_conditions,
+                            #forcing = forcing,
+                            #boundary_conditions = boundary_conditions,
                             )
 @info "Model" model
 #----
@@ -508,10 +500,10 @@ SP_z_yavg = Average(SP_z, dims=(2))
 
 KE_output_fields = (; KE_yavg, ε_yavg, ∫KE, ∫ε, ∫εᴰ, εᴰ_yavg, TKE_yavg, SP_x_yavg, SP_y_yavg, SP_z_yavg  )
 
-simulation.output_writers[:nc] = NetCDFOutputWriter(model, KE_output_fields,
-                                                    filename = "KE_yavg.nc",
-                                                    schedule = TimeInterval(86400second),
-                                                    overwrite_existing = overwrite_existing)
+#simulation.output_writers[:nc] = NetCDFOutputWriter(model, KE_output_fields,
+#                                                    filename = "KE_yavg.nc",
+#                                                    schedule = TimeInterval(86400second),
+#                                                    overwrite_existing = overwrite_existing)
 simulation.output_writers[:nQ] = NetCDFOutputWriter(model, (; Q=Q_inv),
                                                     filename = "Q.nc",
                                                     schedule = TimeInterval(864000second),
